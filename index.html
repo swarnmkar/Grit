@@ -159,6 +159,14 @@
   .gdlist li{background:var(--elev);border-radius:10px;padding:10px 13px 10px 28px;font-size:13.5px;color:var(--txt2);line-height:1.45;position:relative;}
   .gdlist li::before{content:'›';position:absolute;left:12px;top:9px;color:var(--steel);font-size:16px;line-height:1;}
   .gdlist.err li::before{content:'✕';color:var(--accent);font-size:12px;top:11px;}
+  .bkcard{background:var(--accentdim);border:1px solid rgba(239,68,68,0.3);border-radius:14px;padding:18px;text-align:center;margin-bottom:14px;}
+  .bkcheck{font-size:28px;margin-bottom:6px;}
+  .bktitle{font-family:var(--disp);font-size:20px;color:#fff;letter-spacing:0.02em;}
+  .bkname{font-size:13px;color:var(--txt2);margin-top:4px;}
+  .bkwarn{font-size:13px;color:var(--txt2);line-height:1.55;background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:13px;}
+  .bkstatus{font-size:13px;font-weight:600;padding:11px 14px;border-radius:11px;margin-bottom:10px;}
+  .bkstatus.ok{color:#4ade80;background:rgba(74,222,128,0.1);}
+  .bkstatus.danger{color:var(--accent);background:var(--accentdim);}
   nav{position:absolute;bottom:0;left:0;right:0;display:flex;background:rgba(28,29,32,0.94);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:8px 6px calc(env(safe-area-inset-bottom) + 8px);}
   .nb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;cursor:pointer;color:var(--txt3);} .nb svg{width:21px;height:21px;} .nb span{font-size:9.5px;letter-spacing:0.03em;text-transform:uppercase;} .nb.on{color:var(--accent);}
 </style>
@@ -191,7 +199,8 @@
       <div class="prof"><label>Your name</label><input id="pfName" placeholder="e.g. Arjun"></div>
       <div class="prof"><label>Weight units</label><div class="unitseg" id="unitSeg"><div class="s" data-u="kg">kg</div><div class="s" data-u="lb">lb</div></div></div>
       <div class="sectit">Data</div>
-      <button class="pbtn" id="exportBtn">Export / back up my data</button>
+      <div id="youBackup" class="bkstatus danger">⚠ Never backed up — save one now</div>
+      <button class="pbtn" id="exportBtn">Save backup file</button>
       <button class="pbtn" id="importBtn">Import from backup</button>
       <button class="pbtn danger" id="resetBtn">Reset everything</button>
     </section>
@@ -471,10 +480,19 @@ function openFinish(sess){
       if(lg&&lg.length){var key=exKey(t.tt);exLog[key]=exLog[key]||[];exLog[key].push({ts:Date.now(),sets:lg.map(function(s){return{r:s.r,w:s.w};})});}
     });
     sSet('exLog',exLog);
-    sessions.unshift({id:uid(),ts:Date.now(),name:$('#fName').value.trim()||sess.name,tag:sess.tag,done:dn,total:total,sets:setsCount,note:$('#fNote').value.trim()});
+    var sessionName=$('#fName').value.trim()||sess.name;
+    sessions.unshift({id:uid(),ts:Date.now(),name:sessionName,tag:sess.tag,done:dn,total:total,sets:setsCount,note:$('#fNote').value.trim()});
     sSet('sessions',sessions);
     todayState.logs={};todayState.ticks={};persist();
-    closeModal();refreshHeader();switchView('log');renderLogHist();
+    refreshHeader();
+    /* Show backup prompt immediately after logging */
+    var lb=sGet('lastBackup',0),daysSince=lb?Math.floor((Date.now()-lb)/86400000):-1;
+    var warnTxt=daysSince<0?'You have never saved a backup.':(daysSince===0?'Last backup: today.':'Last backup: <b style="color:var(--accent)">'+daysSince+' day'+(daysSince>1?'s':'')+' ago</b>.');
+    $('#sheet').innerHTML='<div class="bkcard"><div class="bkcheck">✓</div><div class="bktitle">Session logged</div><div class="bkname">'+esc(sessionName)+'</div></div>'
+      +'<div class="bkwarn">⚠ Your data only lives on this phone. If the browser clears its storage, it\'s gone.<br><br>'+warnTxt+'</div>'
+      +'<div class="mbtns" style="margin-top:14px"><button class="cancel" id="bkSkip">Skip for now</button><button class="save" id="bkSave">Save backup file</button></div>';
+    $('#bkSave').onclick=function(){exportData();closeModal();switchView('log');renderLogHist();};
+    $('#bkSkip').onclick=function(){closeModal();switchView('log');renderLogHist();};
   };
 }
 
@@ -510,6 +528,15 @@ $('#modal').onclick=function(ev){if(ev.target===$('#modal'))closeModal();};
 function renderYou(){
   $('#pfName').value=profile.name||'';
   $$('#unitSeg .s').forEach(function(s){s.classList.toggle('sel',s.getAttribute('data-u')===profile.units);});
+  var lb=sGet('lastBackup',0),el=$('#youBackup');
+  if(el){
+    if(!lb){el.textContent='⚠ Never backed up — save one now';el.className='bkstatus danger';}
+    else{var d=Math.floor((Date.now()-lb)/86400000);
+      if(d===0){el.textContent='✓ Last backup: today';el.className='bkstatus ok';}
+      else if(d<=7){el.textContent='Last backup: '+d+' day'+(d>1?'s':'')+' ago';el.className='bkstatus ok';}
+      else{el.textContent='⚠ Last backup: '+d+' days ago — save one now';el.className='bkstatus danger';}
+    }
+  }
 }
 function bindProfile(){
   $('#pfName').oninput=function(){profile.name=this.value;sSet('profile',profile);refreshHeader();};
@@ -523,6 +550,8 @@ function exportData(){
   var blob={v:1,app:'grit',profile:profile,todayState:todayState,sessions:sessions,exLog:exLog};
   var s=JSON.stringify(blob,null,2),url=URL.createObjectURL(new Blob([s],{type:'application/json'}));
   var a=document.createElement('a');a.href=url;a.download='grit-backup-'+dstr(Date.now())+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  sSet('lastBackup',Date.now());
+  var yb=$('#youBackup');if(yb)renderYou();
 }
 function importData(b){
   if(!b||typeof b!=='object'){alert('Invalid backup.');return;}
